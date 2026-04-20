@@ -50,6 +50,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             .withSymbolConfiguration(config)
         button.action = #selector(togglePopover)
         button.target = self
+        button.sendAction(on: [.leftMouseUp, .rightMouseUp])
     }
 
     private func setupPopover() {
@@ -57,12 +58,37 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         popover.contentSize = NSSize(width: 380, height: 560)
         popover.behavior = .transient
         popover.animates = true
-        popover.contentViewController = ContentViewController()
+        let vc = ContentViewController()
+        vc.onPinToggle = { [weak self] pinned in
+            self?.setPinned(pinned)
+        }
+        popover.contentViewController = vc
+    }
+
+    private func setPinned(_ pinned: Bool) {
+        popover.behavior = pinned ? .applicationDefined : .transient
+        if let window = popover.contentViewController?.view.window {
+            window.level = pinned ? .floating : .normal
+        }
     }
 
     @objc func togglePopover() {
         guard let button = statusItem.button else { return }
+
+        if NSApp.currentEvent?.type == .rightMouseUp {
+            let menu = NSMenu()
+            menu.addItem(withTitle: "Quit Scratchpad", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+            statusItem.menu = menu
+            button.performClick(nil)
+            statusItem.menu = nil
+            return
+        }
+
         if popover.isShown {
+            if let vc = popover.contentViewController as? ContentViewController, vc.isPinned {
+                vc.setPin(false)
+                setPinned(false)
+            }
             popover.performClose(nil)
         } else {
             popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)

@@ -68,12 +68,12 @@ class GradientOverlayView: NSView {
     }
 }
 
-// MARK: - Help button with hover popover
+// MARK: - Proximity tracking view
 
-class HelpButton: NSButton {
-    private var helpPopover: NSPopover?
+class MouseTrackingView: NSView {
+    var onMouseEntered: (() -> Void)?
+    var onMouseExited: (() -> Void)?
     private var trackingArea: NSTrackingArea?
-    private var dismissWork: DispatchWorkItem?
 
     override func updateTrackingAreas() {
         super.updateTrackingAreas()
@@ -82,70 +82,8 @@ class HelpButton: NSButton {
         addTrackingArea(trackingArea!)
     }
 
-    override func mouseEntered(with event: NSEvent) {
-        dismissWork?.cancel()
-        guard helpPopover == nil else { return }
-        let popover = NSPopover()
-        popover.behavior = .semitransient
-        popover.contentViewController = HelpPopoverViewController()
-        popover.show(relativeTo: bounds, of: self, preferredEdge: .maxY)
-        helpPopover = popover
-    }
-
-    override func mouseExited(with event: NSEvent) {
-        let work = DispatchWorkItem { [weak self] in
-            self?.helpPopover?.performClose(nil)
-            self?.helpPopover = nil
-        }
-        dismissWork = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4, execute: work)
-    }
-}
-
-class HelpPopoverViewController: NSViewController {
-    override func loadView() {
-        let shortcuts: [(String, String)] = [
-            ("H1 / H2 / H3", "Headings"),
-            ("List", "Bullet list"),
-            ("Todo", "Checkbox"),
-            ("Quote", "Block quote"),
-            ("Divider", "Horizontal rule"),
-            ("**text**", "Bold"),
-            ("*text*", "Italic"),
-            ("`code`", "Inline code"),
-        ]
-
-        let stack = NSStackView()
-        stack.orientation = .vertical
-        stack.alignment = .leading
-        stack.spacing = 5
-
-        let monoFont = NSFont.monospacedSystemFont(ofSize: 11, weight: .regular)
-        let labelFont = NSFont.systemFont(ofSize: 11, weight: .regular)
-
-        for (syntax, label) in shortcuts {
-            let row = NSStackView()
-            row.orientation = .horizontal
-            row.spacing = 10
-
-            let syntaxField = NSTextField(labelWithString: syntax)
-            syntaxField.font = monoFont
-            syntaxField.textColor = NSColor.scratchpadHeading
-            syntaxField.setContentHuggingPriority(.defaultHigh, for: .horizontal)
-            syntaxField.widthAnchor.constraint(equalToConstant: 80).isActive = true
-
-            let labelField = NSTextField(labelWithString: label)
-            labelField.font = labelFont
-            labelField.textColor = NSColor.scratchpadPlaceholder
-
-            row.addArrangedSubview(syntaxField)
-            row.addArrangedSubview(labelField)
-            stack.addArrangedSubview(row)
-        }
-
-        stack.edgeInsets = NSEdgeInsets(top: 10, left: 12, bottom: 10, right: 12)
-        view = stack
-    }
+    override func mouseEntered(with event: NSEvent) { onMouseEntered?() }
+    override func mouseExited(with event: NSEvent) { onMouseExited?() }
 }
 
 // MARK: - Content view controller
@@ -153,9 +91,13 @@ class HelpPopoverViewController: NSViewController {
 class ContentViewController: NSViewController {
     private var blockEditor: BlockEditorView!
     private var wordCountLabel: NSTextField!
-    private var helpButton: HelpButton!
+    private var pinButton: NSButton!
+    private var pinHoverZone: MouseTrackingView!
     private var wordCountTimer: Timer?
     private var fadeOutWork: DispatchWorkItem?
+
+    var isPinned = false
+    var onPinToggle: ((Bool) -> Void)?
 
     override func loadView() {
         let bg = BackgroundView(frame: NSRect(x: 0, y: 0, width: 380, height: 560))
@@ -190,13 +132,23 @@ class ContentViewController: NSViewController {
         wordCountLabel.alphaValue = 0
         wordCountLabel.translatesAutoresizingMaskIntoConstraints = false
 
-        helpButton = HelpButton()
-        helpButton.title = "?"
-        helpButton.font = NSFont.systemFont(ofSize: 11, weight: .medium)
-        helpButton.isBordered = false
-        helpButton.contentTintColor = NSColor.scratchpadPlaceholder
-        helpButton.alphaValue = 0.35
-        helpButton.translatesAutoresizingMaskIntoConstraints = false
+        // Pin button — hidden until cursor enters the hover zone
+        pinButton = NSButton()
+        pinButton.isBordered = false
+        pinButton.alphaValue = 0
+        pinButton.action = #selector(togglePin)
+        pinButton.target = self
+        pinButton.translatesAutoresizingMaskIntoConstraints = false
+        updatePinButtonImage()
+
+        // Larger invisible zone at top-right that triggers pin button visibility
+        pinHoverZone = MouseTrackingView()
+        pinHoverZone.translatesAutoresizingMaskIntoConstraints = false
+        pinHoverZone.onMouseEntered = { [weak self] in self?.setPinButtonVisible(true) }
+        pinHoverZone.onMouseExited = { [weak self] in
+            guard let self, !self.isPinned else { return }
+            self.setPinButtonVisible(false)
+        }
 
         let overlay = GradientOverlayView()
         overlay.translatesAutoresizingMaskIntoConstraints = false
@@ -204,7 +156,8 @@ class ContentViewController: NSViewController {
         bg.addSubview(scrollView)
         bg.addSubview(overlay)
         bg.addSubview(wordCountLabel)
-        bg.addSubview(helpButton)
+        bg.addSubview(pinHoverZone)
+        pinHoverZone.addSubview(pinButton)
 
         NSLayoutConstraint.activate([
             scrollView.topAnchor.constraint(equalTo: bg.topAnchor),
@@ -220,11 +173,47 @@ class ContentViewController: NSViewController {
             wordCountLabel.trailingAnchor.constraint(equalTo: bg.trailingAnchor, constant: -16),
             wordCountLabel.bottomAnchor.constraint(equalTo: bg.bottomAnchor, constant: -14),
 
-            helpButton.leadingAnchor.constraint(equalTo: bg.leadingAnchor, constant: 16),
-            helpButton.bottomAnchor.constraint(equalTo: bg.bottomAnchor, constant: -12)
+            // Hover zone: top-right corner, 72×48
+            pinHoverZone.trailingAnchor.constraint(equalTo: bg.trailingAnchor),
+            pinHoverZone.topAnchor.constraint(equalTo: bg.topAnchor),
+            pinHoverZone.widthAnchor.constraint(equalToConstant: 72),
+            pinHoverZone.heightAnchor.constraint(equalToConstant: 48),
+
+            // Pin button centered in hover zone
+            pinButton.centerXAnchor.constraint(equalTo: pinHoverZone.centerXAnchor),
+            pinButton.centerYAnchor.constraint(equalTo: pinHoverZone.centerYAnchor),
         ])
 
         view = bg
+    }
+
+    @objc private func togglePin() {
+        setPin(!isPinned)
+        onPinToggle?(isPinned)
+        setPinButtonVisible(true)
+    }
+
+    func setPin(_ pinned: Bool) {
+        isPinned = pinned
+        updatePinButtonImage()
+        if pinned { setPinButtonVisible(true) }
+    }
+
+    private func setPinButtonVisible(_ visible: Bool) {
+        NSAnimationContext.runAnimationGroup { ctx in
+            ctx.duration = 0.2
+            ctx.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+            ctx.allowsImplicitAnimation = true
+            pinButton.alphaValue = visible ? 1.0 : 0
+        }
+    }
+
+    private func updatePinButtonImage() {
+        let symbolName = isPinned ? "pin.fill" : "pin"
+        let config = NSImage.SymbolConfiguration(pointSize: 12, weight: .medium)
+        pinButton?.image = NSImage(systemSymbolName: symbolName, accessibilityDescription: isPinned ? "Unpin" : "Pin")?
+            .withSymbolConfiguration(config)
+        pinButton?.contentTintColor = isPinned ? NSColor.scratchpadHeading : NSColor.scratchpadPlaceholder
     }
 
     func onPopoverShown() {
