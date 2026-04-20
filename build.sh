@@ -17,6 +17,11 @@ swiftc Sources/*.swift \
 
 cp Info.plist "$APP/Contents/Info.plist"
 
+if [ -d "Fonts" ]; then
+    mkdir -p "$APP/Contents/Resources/Fonts"
+    cp Fonts/*.ttf Fonts/*.otf "$APP/Contents/Resources/Fonts/" 2>/dev/null || true
+fi
+
 echo "✓ Built $APP"
 echo ""
 echo "To run: open $APP"

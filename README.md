@@ -28,8 +28,11 @@ Drag `Scratchpad.app` to `/Applications`, then add it to **System Settings → G
 
 ## Notes
 
-- Your note is saved to `~/Library/Application Support/Scratchpad/note.md` — plain markdown, readable anywhere.
-- Supports `# headings`, `## subheadings`, `**bold**`, `*italic*`, `` `code` ``, `- lists`, `> blockquotes`, and `---` dividers.
-- Type `[]` then space to create an interactive checkbox. Click to toggle.
-- Hover over the `?` in the bottom corner for a quick reference of all shortcuts.
+- Your note is saved to `~/Library/Application Support/Scratchpad/note.json`. Existing `note.md` files are migrated automatically on first launch.
+- Content is structured as **blocks** — each paragraph, heading, or list item is a discrete unit.
+- **Enter** creates a new block below (list and todo blocks carry their type; headings revert to text).
+- **Backspace** on an empty block deletes it and focuses the previous one.
+- Hover the `+` area at the bottom to reveal block type options: Text, H1, H2, H3, List, Todo, Quote, Divider.
+- Within any block, `**bold**`, `*italic*`, and `` `code` `` inline formatting still works.
+- Click a checkbox to toggle it. Checked items get strikethrough.
 - Follows your system light/dark mode automatically.

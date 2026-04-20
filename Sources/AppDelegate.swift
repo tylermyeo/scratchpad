@@ -6,9 +6,20 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var popover: NSPopover!
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        NSApp.appearance = NSAppearance(named: .aqua)
+        registerFonts()
         setupMainMenu()
         setupStatusItem()
         setupPopover()
+    }
+
+    private func registerFonts() {
+        guard let resourceURL = Bundle.main.resourceURL else { return }
+        let fontsURL = resourceURL.appendingPathComponent("Fonts")
+        guard let files = try? FileManager.default.contentsOfDirectory(at: fontsURL, includingPropertiesForKeys: nil) else { return }
+        for url in files where url.pathExtension == "ttf" || url.pathExtension == "otf" {
+            CTFontManagerRegisterFontsForURL(url as CFURL, .process, nil)
+        }
     }
 
     private func setupMainMenu() {
